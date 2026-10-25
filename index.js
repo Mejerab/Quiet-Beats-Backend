@@ -18,7 +18,10 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 dotenv.config();
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: [
+        'http://localhost:5173',
+        'https://quiet-beats.onrender.com'
+    ],
     credentials: true
 }))
 app.use(express.json())
@@ -144,35 +147,65 @@ async function run() {
         const upload = multer({ dest: 'uploads/' });
 
         app.post("/upload", upload.single("file"), async (req, res) => {
-            const { album, albumPhoto, artist, feat, publisher, genre, language, lovedBy } = req.body;
-            console.log("Received file:", albumPhoto); // ✅ Should show file info
+            const {
+                album, albumPhoto, artist, feat, publisher,
+                genre, language, lovedBy
+            } = req.body;
 
             if (!req.file) {
                 return res.status(400).json({ error: "No file received" });
             }
+
             try {
                 const catForm = new FormData();
                 catForm.append("reqtype", "fileupload");
-                catForm.append("fileToUpload", fs.createReadStream(req.file.path));
-                const catResponse = await axios.post("https://catbox.moe/user/api.php", catForm, {
-                    headers: catForm.getHeaders(),
-                });
-                fs.unlinkSync(req.file.path); // clean up
-                const count = (await songCollection.find().toArray()).length;
+                catForm.append(
+                    "fileToUpload",
+                    fs.createReadStream(req.file.path)
+                );
+
+                const catResponse = await axios.post(
+                    "https://catbox.moe/user/api.php",
+                    catForm,
+                    { headers: catForm.getHeaders() }
+                );
+
+                const count = (await songCollection.countDocuments()) + 1;
+
                 const data = {
-                    album, image: albumPhoto, genre, artist, publisher, song: catResponse.data, language, lovedBy: [], count: count + 1
-                }
+                    album,
+                    image: albumPhoto,
+                    genre,
+                    artist,
+                    publisher,
+                    song: catResponse.data,
+                    language,
+                    lovedBy: [],
+                    count
+                };
+
                 if (feat) data.feat = feat;
+
                 if (catResponse.data) {
                     const result = await songCollection.insertOne(data);
-                    res.send(result);
+                    return res.send(result);
                 }
-                else {
-                    res.send({ alert: 'insertation problem' });
-                }
+
+                return res.status(500).send({
+                    alert: "Insertion problem"
+                });
+
             } catch (err) {
                 console.error("Upload error:", err);
-                res.status(500).send({ error: "Upload failed" });
+                return res.status(500).send({ error: "Upload failed" });
+
+            } finally {
+                // Delete the temporary file whether the operation succeeds or fails.
+                if (req.file?.path) {
+                    await fs.promises.unlink(req.file.path).catch(err => {
+                        console.error("Temporary file cleanup failed:", err);
+                    });
+                }
             }
         });
         app.get('/uploads', async (req, res) => {
@@ -266,7 +299,7 @@ async function run() {
                         viewCount: {
                             $size: {
                                 $filter: {
-                                    input: {$ifNull: ["$views", []]},
+                                    input: { $ifNull: ["$views", []] },
                                     as: 'view',
                                     cond: { $eq: ["$$view", email] }
                                 }

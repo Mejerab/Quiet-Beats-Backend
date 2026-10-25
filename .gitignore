@@ -5,4 +5,6 @@ service-account*.json
 .env.*
 !.env.example
 
+uploads/
+
 node_modules/
